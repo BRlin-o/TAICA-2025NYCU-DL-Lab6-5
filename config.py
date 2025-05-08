@@ -35,7 +35,7 @@ class Config:
     USE_LORA = True                   # 是否使用LoRA
     LORA_RANK = 32                    # LoRA的rank
     LORA_ALPHA = 64                   # LoRA的alpha值
-    VAE_MODEL = "stabilityai/sd-vae-ft-mse"  # 預訓練VAE模型
+    VAE_MODEL = "stabilityai/sd-turbo"  # 預訓練VAE模型
     LATENT_CHANNELS = 4               # 潛在空間的通道數
     CONDITION_DIM = 1024               # 條件嵌入維度
     NUM_CLASSES = 24                  # 物件類別數 (24 = 8色 x 3形)
@@ -47,26 +47,26 @@ class Config:
     PREDICTION_TYPE = "v_prediction"  # 預測類型: "epsilon" or "v_prediction"
     
     # 採樣參數
-    GUIDANCE_SCALE = 7.5              # 無條件引導強度(CFG) Classifier-free guidance
+    GUIDANCE_SCALE = 9.0              # 無條件引導強度(CFG) Classifier-free guidance
     CLASSIFIER_SCALE = 12              # 分類器引導強度
 
     # 訓練參數
     RESUME = None                     # 恢復訓練的檢查點路徑
     # RESUME = "output/2023-10-01_12-00-00/checkpoints/epoch_100.pth"    
-    BATCH_SIZE = 128                  # 批次大小
-    NUM_EPOCHS = 50                   # 訓練輪數
+    BATCH_SIZE = 64                  # 批次大小
+    NUM_EPOCHS = 200                   # 訓練輪數
     LEARNING_RATE = 1e-4              # 學習率
     WEIGHT_DECAY = 1e-5               # 權重衰減係數
     FP16 = False                      # 混合精度訓練開關
     GRAD_CLIP = 0.5                   # 梯度裁剪閾值
     SEED = 42                         # 隨機種子
     SAVE_EVERY = 15                   # 儲存檢查點的間隔(輪數)
-    EVAL_EVERY = 1                    # 評估檢查點的間隔(輪數)
+    EVAL_EVERY = 5                    # 評估檢查點的間隔(輪數)
     LOG_STEP_EVERY = 10                     # 記錄日誌的間隔(輪數)
     
     # 硬體相關
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    NUM_WORKERS = 12                   # 數據載入的工作線程數
+    NUM_WORKERS = 6                   # 數據載入的工作線程數
 
     # 驗證參數
     SPECIFIC_LABELS = ["red sphere", "cyan cylinder", "cyan cube"]

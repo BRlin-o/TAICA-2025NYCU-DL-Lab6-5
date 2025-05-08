@@ -85,6 +85,7 @@ class ICLEVRDataset(Dataset):
             shuffle=shuffle,
             num_workers=num_workers,
             pin_memory=True,
+            persistent_workers=True,
             collate_fn=collate_fn
         )
 

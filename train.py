@@ -112,9 +112,11 @@ def train(args):
     # 混合精度訓練
     scaler = torch.amp.GradScaler('cuda') if Config.FP16 else None
     
-    if Config.DEVICE.type == 'cuda':
-        torch.backends.cudnn.benchmark = True  # 為固定大小輸入優化CUDNN
-        logger.info("CUDNN Benchmarking enabled")
+    # if Config.DEVICE.type == 'cuda':
+    #     torch.backends.cudnn.benchmark = True  # 為固定大小輸入優化CUDNN
+    #     torch.backends.cudnn.deterministic = False
+    #     logger.info("CUDNN Benchmarking enabled")
+        
 
     
     # 開始訓練
@@ -183,8 +185,8 @@ def train(args):
             save_checkpoint(checkpoint_path, model, optimizer, epoch + 1)
             logger.info(f"Checkpoint saved at {checkpoint_path}")
 
-        if (epoch + 1) % Config.EVAL_EVERY == 0:
-            logger.info("生成去噪过程可视化...")
+        if (epoch + 1) % Config.EVAL_EVERY == 0 or epoch == 0:
+            logger.info("Generating samples...")
             denoising_path = visualize_denoising_process(
                 model=model,
                 data_dir=Config.DATA_DIR,
