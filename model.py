@@ -2,6 +2,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision import transforms
 from diffusers import AutoencoderKL, UNet2DConditionModel
 from diffusers import DDPMScheduler, DDIMScheduler
 from diffusers.utils import BaseOutput
@@ -51,7 +52,10 @@ class ConditionalLDM(nn.Module):
             self.lora_alpha = 32
 
         # 1. 加載預訓練VAE
-        self.vae = AutoencoderKL.from_pretrained(self.vae_model_path)
+        self.vae = AutoencoderKL.from_pretrained(
+            self.vae_model_path,
+            subfolder="vae",
+        )
 
         # 凍結VAE參數
         for param in self.vae.parameters():
@@ -285,9 +289,6 @@ class ConditionalLDM(nn.Module):
 
         # 採樣循環
         for i, t in enumerate(timesteps):
-            # 清理GPU内存
-            torch.cuda.empty_cache()
-
             # 計算進度
             progress = i / len(timesteps)
 
@@ -327,7 +328,7 @@ class ConditionalLDM(nn.Module):
 
             # 清理本步骤中间变量
             del noise_pred, latent_model_input
-            torch.cuda.empty_cache()
+            torch.cuda.empty_cache() # 清理GPU内存
             
         # 解碼生成的潛變量
         images = self.decode(latents)
@@ -370,9 +371,6 @@ class ConditionalLDM(nn.Module):
 
     def _apply_classifier_guidance_single(self, noise_pred, latents, t, labels, classifier_scale=1.0):
         """单批次分类器引导，内存优化版"""
-        # 主动清理缓存
-        torch.cuda.empty_cache()
-        
         device = latents.device
         
         # 创建可微分的潜变量
@@ -395,9 +393,11 @@ class ConditionalLDM(nn.Module):
 
                 # 确保图像在正确的值范围 (-1 到 1)
                 images_norm = torch.clamp(images, -1.0, 1.0)
+                # images = (images + 1) / 2  # [-1,1] -> [0,1]
+                # images_norm = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))(images)
                 
                 # 3. 确保分类器和图像在同一设备上
-                cls_device = self._classifier_device
+                # cls_device = self._classifier_device
                 ## ========== v1: 基本計算 ========== ##
                 # pred = self._classifier.resnet18(images_norm.to(cls_device))
                 
@@ -427,30 +427,49 @@ class ConditionalLDM(nn.Module):
 
                 ## ========== 修改分类器引导实现 ========== ##
 
-                # 计算准确度作为损失
-                cls_score = self._classifier.resnet18(images_norm.to(cls_device))
+                # # 计算准确度作为损失
+                # cls_score = self._classifier.resnet18(images_norm.to(cls_device))
                 
-                # 多目标损失：准确率最大化 + 物体数量控制
-                target_count = labels.sum(dim=1, keepdim=True).to(cls_device)  # 获取期望物体数量
+                # # 多目标损失：准确率最大化 + 物体数量控制
+                # target_count = labels.sum(dim=1, keepdim=True).to(cls_device)  # 获取期望物体数量
                 # pred_count = torch.sigmoid(cls_score).sum(dim=1, keepdim=True)  # 估计的物体数量
-                pred_count = calculate_object_count(cls_score, threshold=0.5).to(cls_device)  # 估计的物体数量
+                # # pred_count = calculate_object_count(cls_score, threshold=0.5).to(cls_device)  # 估计的物体数量
                 
-                # 1. 准确率损失 (使用evaluator的准确率计算)
-                acc_loss = -self._classifier.compute_acc(cls_score.cpu(), labels.cpu()) * 10.0
+                # # 1. 准确率损失 (使用evaluator的准确率计算)
+                # acc_loss = -self._classifier.compute_acc(cls_score.cpu(), labels.cpu()) * 10.0
                 
-                # 2. 物体数量损失 (惩罚物体数量差异)
-                count_loss = F.mse_loss(pred_count, target_count) * 5.0
+                # # 2. 物体数量损失 (惩罚物体数量差异)
+                # count_loss = F.mse_loss(pred_count, target_count) * 5.0
                 
-                # 组合损失
-                total_loss = acc_loss + count_loss
+                # # 组合损失
+                # total_loss = acc_loss + count_loss
                 
-                # 计算梯度
-                grad = torch.autograd.grad(total_loss, latents_in)[0]
+                # # 计算梯度
+                # grad = torch.autograd.grad(total_loss, latents_in)[0]
                 
-                # 7. 标准化梯度
-                grad_norm = torch.norm(grad)
-                if grad_norm > 0:
-                    grad = grad / grad_norm
+                # # 7. 标准化梯度
+                # grad_norm = torch.norm(grad)
+                # if grad_norm > 0:
+                #     grad = grad / grad_norm
+
+                # 2. 取得分類器 logits
+                cls_device = self._classifier_device
+                logits = self._classifier.resnet18(images_norm.to(cls_device))  # (B,24)
+
+                # 3. 目標 one‑hot、物體數
+                target = labels.to(cls_device).float()
+                target_count = target.sum(dim=1, keepdim=True)
+                pred_prob  = torch.sigmoid(logits)
+                pred_count = pred_prob.sum(dim=1, keepdim=True)
+
+                # 4. 可微損失
+                bce_loss   = F.binary_cross_entropy_with_logits(logits, target)
+                cnt_loss   = F.mse_loss(pred_count, target_count)
+                total_loss = bce_loss + 0.25 * cnt_loss            # 0.5 可再調
+
+                # 5. 取得梯度並正規化
+                grad = torch.autograd.grad(total_loss, latents_in, retain_graph=False)[0]
+                grad = grad / (grad.norm() + 1e-8)
                 
                 # 8. 应用梯度
                 return noise_pred - classifier_scale * grad.to(device)

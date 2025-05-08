@@ -47,8 +47,8 @@ class Config:
     PREDICTION_TYPE = "v_prediction"  # 預測類型: "epsilon" or "v_prediction"
     
     # 採樣參數
-    GUIDANCE_SCALE = 9.0              # 無條件引導強度(CFG) Classifier-free guidance
-    CLASSIFIER_SCALE = 12              # 分類器引導強度
+    GUIDANCE_SCALE = 8.0              # 無條件引導強度(CFG) Classifier-free guidance
+    CLASSIFIER_SCALE = 10.0              # 分類器引導強度
 
     # 訓練參數
     RESUME = None                     # 恢復訓練的檢查點路徑
