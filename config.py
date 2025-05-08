@@ -60,12 +60,16 @@ class Config:
     FP16 = False                      # 混合精度訓練開關
     GRAD_CLIP = 0.5                   # 梯度裁剪閾值
     SEED = 42                         # 隨機種子
-    SAVE_EVERY = 10                   # 每10輪儲存一次檢查點
-    EVAL_EVERY = 1                    # 每10輪評估一次模型
+    SAVE_EVERY = 15                   # 儲存檢查點的間隔(輪數)
+    EVAL_EVERY = 1                    # 評估檢查點的間隔(輪數)
+    LOG_STEP_EVERY = 10                     # 記錄日誌的間隔(輪數)
     
     # 硬體相關
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     NUM_WORKERS = 12                   # 數據載入的工作線程數
+
+    # 驗證參數
+    SPECIFIC_LABELS = ["red sphere", "cyan cylinder", "cyan cube"]
     
     @classmethod
     def update_paths(cls, wandb_id=None):

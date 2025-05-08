@@ -9,15 +9,15 @@ from torch.utils.data import DataLoader
 
 from model import ConditionalLDM
 from dataset import get_dataset, get_transforms
-from utils import save_images, setup_logging, load_checkpoint
+from utils import save_images, setup_logging, load_checkpoint, normalize_for_evaluator
 from evaluator import evaluation_model
 from config import Config
 
-def normalize_for_evaluator(images):
-    """正確標準化張量以用於評估器"""
-    # 確保值在[-1,1]範圍內
-    images = torch.clamp(images, -1.0, 1.0)
-    return images
+# def normalize_for_evaluator(images):
+#     """正確標準化張量以用於評估器"""
+#     # 確保值在[-1,1]範圍內
+#     images = torch.clamp(images, -1.0, 1.0)
+#     return images
 
 def evaluate_model(
     model=None,
@@ -31,7 +31,8 @@ def evaluate_model(
     checkpoint=None,
     vae_model=None,
     save_dir=None,
-    run_id=None
+    run_id=None,
+    epoch=None
 ):
     """
     評估模型在測試集上的性能
@@ -142,12 +143,17 @@ def evaluate_model(
             # 保存網格圖像
             eval_dir = os.path.join(save_dir, "eval")
             os.makedirs(eval_dir, exist_ok=True)
-            grid_path = os.path.join(eval_dir, f"{test_name}_grid.png")
+
+            epoch_suffix = f"_epoch{epoch}" if epoch is not None else ""
+            grid_path = os.path.join(eval_dir, f"{test_name}_grid{epoch_suffix}.png")
+
             save_images(all_images[:min(32, len(all_images))], None, grid_path, nrow=4)
             logger.info(f"網格圖像已保存至: {grid_path}")
             
             # 保存單獨圖像
             img_dir = os.path.join(save_dir, "images", test_name)
+            if epoch is not None:
+                img_dir = os.path.join(img_dir, f"epoch{epoch}")  # 为每个epoch创建子文件夹
             os.makedirs(img_dir, exist_ok=True)
             
             for i, img in enumerate(all_images):
@@ -176,11 +182,14 @@ def visualize_denoising_process(
     save_dir=None,
     specific_objects=["red sphere", "cyan cylinder", "cyan cube"],
     guidance_scale=7.5,
-    num_steps=25,
+    classifier_scale=10.0,
+    num_steps=50,
+    num_images=12,
     device='cuda',
     checkpoint=None,
     vae_model=None,
-    seed=42
+    seed=42,
+    epoch=None
 ):
     """
     可視化去噪過程
@@ -191,7 +200,9 @@ def visualize_denoising_process(
         save_dir: 保存生成圖像的目錄
         specific_objects: 特定物件列表
         guidance_scale: CFG引導強度
+        classifier_scale: 分类器引导强度
         num_steps: 擴散步數
+        num_images: 要保存的图像数量（均匀采样的时间步）
         device: 運行設備
         checkpoint: 檢查點路徑 (當model為None時使用)
         vae_model: VAE模型路徑
@@ -246,13 +257,22 @@ def visualize_denoising_process(
     
     # 保存去噪過程中的圖像
     denoising_images = []
+
+    # 确定要保存的时间步索引
+    # 均匀选择num_images个时间步，包括起始噪声和最终结果
+    if num_images <= 2:
+        save_indices = [0, len(timesteps)-1]  # 只保存开始和结束
+    else:
+        # 确保始终包含起始噪声和最终生成图像
+        indices = np.linspace(0, len(timesteps)-1, num_images-1, dtype=int)
+        save_indices = [0] + list(indices)  # 添加噪声图像
     
     # 紀錄起始雜訊狀態
     with torch.no_grad():
         noise_img = model.decode(latents)
         denoising_images.append(noise_img.cpu())
     
-    print(f"使用 {num_steps} 步擴散進行去噪...")
+    print(f"使用 {num_steps} 步擴散進行去噪，保存 {num_images} 张图像...")
     
     # 準備條件嵌入 (只計算一次)
     condition_embedding = model.prepare_condition(label)
@@ -287,10 +307,16 @@ def visualize_denoising_process(
         # 更新採樣
         latents_t = model.sampler.step(noise_pred, t, latents_t).prev_sample
         
-        # 儲存中間結果
-        with torch.no_grad():
-            mid_img = model.decode(latents_t)
-            denoising_images.append(mid_img.cpu())
+        # # 儲存中間結果
+        # with torch.no_grad():
+        #     mid_img = model.decode(latents_t)
+        #     denoising_images.append(mid_img.cpu())
+
+        # 储存选定的中间结果
+        if i in save_indices[1:] or i == len(timesteps)-1:  # 确保包含最后一步
+            with torch.no_grad():
+                mid_img = model.decode(latents_t)
+                denoising_images.append(mid_img.cpu())
             
         # 釋放記憶體
         del noise_pred, latent_model_input
@@ -301,7 +327,10 @@ def visualize_denoising_process(
         os.makedirs(os.path.join(save_dir, "eval"), exist_ok=True)
         
         # 保存去噪過程網格
-        denoising_grid_path = os.path.join(save_dir, "eval", "denoising_process.png")
+        # denoising_grid_path = os.path.join(save_dir, "eval", "denoising_process.png")
+        epoch_suffix = f"_epoch{epoch}" if epoch is not None else ""
+        objects_name = "_".join([obj.replace(" ", "-") for obj in specific_objects])
+        denoising_grid_path = os.path.join(save_dir, "eval", f"denoising_process{epoch_suffix}_{objects_name}.png")
         
         # 將所有圖像串聯
         all_denoise_images = torch.cat(denoising_images)
@@ -309,17 +338,17 @@ def visualize_denoising_process(
         # 保存為網格
         save_images(all_denoise_images, None, denoising_grid_path, nrow=len(denoising_images))
         
-        # 保存為逐步圖像
-        steps_dir = os.path.join(save_dir, "eval", "denoising_steps")
-        os.makedirs(steps_dir, exist_ok=True)
+        # # 保存為逐步圖像(由num_images和save_indices取帶)
+        # steps_dir = os.path.join(save_dir, "eval", "denoising_steps")
+        # os.makedirs(steps_dir, exist_ok=True)
         
-        for i, img in enumerate(denoising_images):
-            step_name = "noise" if i == 0 else f"step_{i}"
-            img_path = os.path.join(steps_dir, f"{step_name}.png")
-            img_normalized = (img.squeeze() + 1) / 2
-            img_normalized = torch.clamp(img_normalized, 0, 1)
-            pil_image = transforms.ToPILImage()(img_normalized)
-            pil_image.save(img_path)
+        # for i, img in enumerate(denoising_images):
+        #     step_name = "noise" if i == 0 else f"step_{i}"
+        #     img_path = os.path.join(steps_dir, f"{step_name}.png")
+        #     img_normalized = (img.squeeze() + 1) / 2
+        #     img_normalized = torch.clamp(img_normalized, 0, 1)
+        #     pil_image = transforms.ToPILImage()(img_normalized)
+        #     pil_image.save(img_path)
         
         print(f"去噪過程可視化已保存至: {denoising_grid_path}")
         return denoising_grid_path

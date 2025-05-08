@@ -190,9 +190,11 @@ class ConditionalLDM(nn.Module):
             images = self.vae.decode(latents).sample
         return images
     
-    def prepare_condition(self, labels):
-        """處理條件標籤"""
-        return self.condition_embedding(labels).unsqueeze(1)
+    def prepare_condition(self, labels, threshold=0.5):
+        """增强版条件预处理"""
+        # 应用阈值使信号更清晰
+        binary_labels = (labels > threshold).float()
+        return self.condition_embedding(binary_labels).unsqueeze(1)
     
     def forward(self, pixel_values, labels):
         """
@@ -430,7 +432,8 @@ class ConditionalLDM(nn.Module):
                 
                 # 多目标损失：准确率最大化 + 物体数量控制
                 target_count = labels.sum(dim=1, keepdim=True).to(cls_device)  # 获取期望物体数量
-                pred_count = torch.sigmoid(cls_score).sum(dim=1, keepdim=True)  # 估计的物体数量
+                # pred_count = torch.sigmoid(cls_score).sum(dim=1, keepdim=True)  # 估计的物体数量
+                pred_count = calculate_object_count(cls_score, threshold=0.5).to(cls_device)  # 估计的物体数量
                 
                 # 1. 准确率损失 (使用evaluator的准确率计算)
                 acc_loss = -self._classifier.compute_acc(cls_score.cpu(), labels.cpu()) * 10.0
@@ -461,3 +464,20 @@ class ConditionalLDM(nn.Module):
         finally:
             # 确保资源释放
             torch.cuda.empty_cache()
+
+
+def calculate_object_count(cls_score, threshold=0.5):
+    """更精确的物体数量计算"""
+    # 将logits转换为概率
+    probs = torch.sigmoid(cls_score)
+    
+    # 方法1：概率总和（连续估计）
+    continuous_count = probs.sum(dim=1, keepdim=True)
+    
+    # 方法2：阈值计数（离散估计）
+    discrete_count = (probs > threshold).float().sum(dim=1, keepdim=True)
+    
+    # 综合估计（平均两种方法）
+    estimated_count = (continuous_count + discrete_count) / 2
+    
+    return estimated_count

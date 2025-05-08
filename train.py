@@ -9,7 +9,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torchvision import transforms
 from dataset import get_dataset, get_transforms, iclevr_collate_fn
 from model import ConditionalLDM
-from evaluate import evaluate_model
+from evaluate import evaluate_model, visualize_denoising_process
 from utils import save_checkpoint, load_checkpoint, save_images, setup_logging, log_images
 from config import Config
 
@@ -184,6 +184,21 @@ def train(args):
             logger.info(f"Checkpoint saved at {checkpoint_path}")
 
         if (epoch + 1) % Config.EVAL_EVERY == 0:
+            logger.info("生成去噪过程可视化...")
+            denoising_path = visualize_denoising_process(
+                model=model,
+                data_dir=Config.DATA_DIR,
+                save_dir=Config.RUN_DIR,
+                specific_objects=Config.SPECIFIC_LABELS, # specific_objects = ["red sphere", "cyan cylinder", "cyan cube"]  # 可以根据需要修改
+                guidance_scale=Config.GUIDANCE_SCALE,
+                classifier_scale=Config.CLASSIFIER_SCALE if hasattr(Config, 'CLASSIFIER_SCALE') else 10.0,
+                num_steps=Config.NUM_INFERENCE_STEPS,
+                num_images=12,  # 生成12张图像串联
+                device=Config.DEVICE,
+                seed=epoch,  # 使用epoch作为种子以获得不同的结果
+                epoch=epoch+1
+            )
+
             logger.info("Evaluating model...")
 
             results = evaluate_model(
@@ -195,7 +210,8 @@ def train(args):
                 batch_size=16,
                 device=Config.DEVICE,
                 save_dir=Config.RUN_DIR,
-                run_id=Config.RUN_ID
+                run_id=Config.RUN_ID,
+                epoch=epoch+1
             )
 
             for test_file, acc in results.items():
@@ -206,6 +222,8 @@ def train(args):
                 for test_file, acc in results.items():
                     test_name = test_file.split('.')[0]
                     wandb.log({f"evaluate/{test_name}_accuracy": acc})
+
+            
                     
     logger.info("Training completed!")
 

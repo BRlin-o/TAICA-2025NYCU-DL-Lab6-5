@@ -131,7 +131,9 @@ def main():
             run_id=Config.RUN_ID
         )
 
-        print(f"評估結果: {results}")
+        print("評估結果: ")
+        for key, value in results.items():
+            print(f"\t{key}: {value}")
         
         # 可視化去噪過程
         if args.visualize_denoising:
@@ -140,6 +142,7 @@ def main():
                 data_dir=Config.DATA_DIR,
                 save_dir=Config.RUN_DIR,
                 guidance_scale=Config.GUIDANCE_SCALE,
+                classifier_scale=Config.CLASSIFIER_SCALE,
                 num_steps=Config.NUM_INFERENCE_STEPS,
                 device=Config.DEVICE,
                 checkpoint=args.checkpoint,
