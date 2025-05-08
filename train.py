@@ -192,6 +192,7 @@ def train(args):
                 test_files=[Config.TEST_JSON, Config.NEW_TEST_JSON],
                 guidance_scale=Config.GUIDANCE_SCALE,
                 num_steps=Config.NUM_INFERENCE_STEPS,
+                batch_size=16,
                 device=Config.DEVICE,
                 save_dir=Config.RUN_DIR,
                 run_id=Config.RUN_ID

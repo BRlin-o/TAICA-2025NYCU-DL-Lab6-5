@@ -11,3 +11,4 @@ wheels/
 iclevr/*.png
 output/*.log
 output/*/
+wandb/

@@ -11,7 +11,7 @@ class Config:
     RUN_ID = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")  # 執行ID，用時間戳記
 
     # Wandb設定
-    USE_WANDB = False
+    USE_WANDB = True
     WANDB_ID = None  # 將在使用wandb時設置
     WANDB_PROJECT = "conditional-ddpm(v5)"
     WANDB_NAME = ""
@@ -33,8 +33,8 @@ class Config:
     # 模型架構設定
     PRETRAINED_MODEL = "stabilityai/sd-turbo"  # 預訓練模型名稱
     USE_LORA = True                   # 是否使用LoRA
-    LORA_RANK = 16                    # LoRA的rank
-    LORA_ALPHA = 32                   # LoRA的alpha值
+    LORA_RANK = 24                    # LoRA的rank
+    LORA_ALPHA = 48                   # LoRA的alpha值
     VAE_MODEL = "stabilityai/sd-vae-ft-mse"  # 預訓練VAE模型
     LATENT_CHANNELS = 4               # 潛在空間的通道數
     CONDITION_DIM = 1024               # 條件嵌入維度
@@ -48,7 +48,7 @@ class Config:
     
     # 採樣參數
     GUIDANCE_SCALE = 7.5              # 無條件引導強度(CFG) Classifier-free guidance
-    CLASSIFIER_SCALE = 2              # 分類器引導強度
+    CLASSIFIER_SCALE = 12              # 分類器引導強度
 
     # 訓練參數
     RESUME = None                     # 恢復訓練的檢查點路徑

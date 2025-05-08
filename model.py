@@ -283,6 +283,10 @@ class ConditionalLDM(nn.Module):
 
         # 採樣循環
         for i, t in enumerate(timesteps):
+            # 清理GPU内存
+            torch.cuda.empty_cache()
+
+            # 計算進度
             progress = i / len(timesteps)
 
             # 擴展潛變量
@@ -293,11 +297,12 @@ class ConditionalLDM(nn.Module):
             encoder_hidden_states = torch.cat([condition_embedding, uncond_embedding])
             
             # 預測噪聲
-            noise_pred = self.unet(
-                latent_model_input, 
-                t,
-                encoder_hidden_states=encoder_hidden_states
-            ).sample
+            with torch.no_grad():  # 确保UNet不保留梯度
+                noise_pred = self.unet(
+                    latent_model_input, 
+                    t,
+                    encoder_hidden_states=encoder_hidden_states
+                ).sample
 
             # 執行CFG
             noise_pred_cond, noise_pred_uncond = noise_pred.chunk(2)
@@ -317,6 +322,10 @@ class ConditionalLDM(nn.Module):
             
             # 更新采样
             latents = self.sampler.step(noise_pred, t, latents).prev_sample
+
+            # 清理本步骤中间变量
+            del noise_pred, latent_model_input
+            torch.cuda.empty_cache()
             
         # 解碼生成的潛變量
         images = self.decode(latents)
@@ -328,38 +337,88 @@ class ConditionalLDM(nn.Module):
 
     # 添加分类器引导方法
     def _apply_classifier_guidance(self, noise_pred, latents, t, labels, classifier_scale=1.0):
-        """应用分类器引导"""
+        """内存优化版分类器引导"""
         if classifier_scale == 0:
             return noise_pred
         
+        # 选择性应用 - 只在每4个步骤应用一次分类器引导，减少内存消耗
+        step_idx = int(t.item())
+        if step_idx % 4 != 0:
+            return noise_pred
+        
+        # 减少批次大小并分批处理
+        batch_size = latents.shape[0]
+        if batch_size > 4:  # 批次过大时分批处理
+            results = []
+            for i in range(0, batch_size, 4):
+                end = min(i + 4, batch_size)
+                batch_result = self._apply_classifier_guidance_single(
+                    noise_pred[i:end], 
+                    latents[i:end], 
+                    t, 
+                    labels[i:end], 
+                    classifier_scale
+                )
+                results.append(batch_result)
+            return torch.cat(results, dim=0)
+        else:
+            return self._apply_classifier_guidance_single(
+                noise_pred, latents, t, labels, classifier_scale
+            )
+
+    def _apply_classifier_guidance_single(self, noise_pred, latents, t, labels, classifier_scale=1.0):
+        """单批次分类器引导，内存优化版"""
+        # 主动清理缓存
+        torch.cuda.empty_cache()
+        
+        device = latents.device
+        
         # 创建可微分的潜变量
-        latents_in = latents.detach().requires_grad_(True)
+        latents_in = latents.detach().clone().requires_grad_(True)
         
-        # 解码当前状态
-        with torch.enable_grad():
-            latents_scaled = 1 / 0.18215 * latents_in
-            images = self.vae.decode(latents_scaled).sample
-            
-            # 标准化
-            images_norm = torch.clamp(images, -1.0, 1.0)
-            
-            # 获取分类器
+        # 延迟加载分类器 - 确保仅加载一次
+        if not hasattr(self, "_classifier"):
             from evaluator import evaluation_model
-            if not hasattr(self, "_classifier"):
-                self._classifier = evaluation_model()
-            
-            # 预测标签
-            cls_device = next(self._classifier.resnet18.parameters()).device
-            pred = self._classifier.resnet18(images_norm.to(cls_device))
-            
-            # 简单的MSE损失 (确保可微分)
-            target = labels.to(cls_device)
-            loss = torch.mean((pred.sigmoid() - target)**2)
-            
-            # 计算梯度
-            grad = torch.autograd.grad(loss, latents_in)[0]
-            
-            # 应用梯度
-            noise_pred = noise_pred - classifier_scale * grad.to(noise_pred.device)
+            self._classifier = evaluation_model()
+            self._classifier_device = next(self._classifier.resnet18.parameters()).device
         
-        return noise_pred
+        try:
+            with torch.enable_grad():
+                # 1. 解码但使用较低精度
+                latents_scaled = 1 / 0.18215 * latents_in
+                # with torch.no_grad():  # 避免VAE解码产生梯度
+                    # with torch.cuda.amp.autocast():  # 使用混合精度降低内存使用
+                        # images = self.vae.decode(latents_scaled).sample
+                images = self.vae.decode(latents_scaled).sample
+
+                # 确保图像在正确的值范围 (-1 到 1)
+                images_norm = torch.clamp(images, -1.0, 1.0)
+                
+                # 3. 确保分类器和图像在同一设备上
+                cls_device = self._classifier_device
+                pred = self._classifier.resnet18(images_norm.to(cls_device))
+                
+                # 4. 使用二元交叉熵损失
+                target = labels.to(cls_device)
+                loss = F.binary_cross_entropy_with_logits(pred, target)
+                
+                # 5. 计算梯度并立即释放
+                grad = torch.autograd.grad(loss, latents_in)[0]
+                
+                # 6. 显式删除不需要的张量
+                del loss, pred, images, images_norm, latents_scaled
+                
+                # 7. 标准化梯度
+                grad_norm = torch.norm(grad) + 1e-10
+                grad = grad / grad_norm
+                
+                # 8. 应用梯度
+                return noise_pred - classifier_scale * grad.to(device)
+        
+        except Exception as e:
+            print(f"分类器引导出错 ({t.item()}): {e}")
+            torch.cuda.empty_cache()  # 错误时清理
+            return noise_pred  # 出错时返回原始预测
+        finally:
+            # 确保资源释放
+            torch.cuda.empty_cache()

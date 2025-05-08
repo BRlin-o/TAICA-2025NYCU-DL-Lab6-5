@@ -61,10 +61,10 @@ class ICLEVRDataset(Dataset):
         # 創建one-hot標籤
         one_hot = torch.zeros(len(self.obj2idx))
         for obj in labels:
-            one_hot[self.obj2idx[obj]] = 0.95
+            one_hot[self.obj2idx[obj]] = 1.0  # 从0.95改为1.0，增强信号强度
 
         # 增加標籤平滑化
-        one_hot[one_hot == 0] = 0.01 / (len(self.obj2idx) - len(labels))
+        one_hot[one_hot == 0] = 0.0  # 从0.01改为0，增强正负标签对比
             
         # 讀取圖像(訓練)
         if self.is_train and self.img_dir is not None:
