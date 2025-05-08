@@ -396,26 +396,65 @@ class ConditionalLDM(nn.Module):
                 
                 # 3. 确保分类器和图像在同一设备上
                 cls_device = self._classifier_device
-                pred = self._classifier.resnet18(images_norm.to(cls_device))
+                ## ========== v1: 基本計算 ========== ##
+                # pred = self._classifier.resnet18(images_norm.to(cls_device))
                 
-                # 4. 使用二元交叉熵损失
-                target = labels.to(cls_device)
-                loss = F.binary_cross_entropy_with_logits(pred, target)
+                # # 4. 使用二元交叉熵损失
+                # target = labels.to(cls_device)
+                # loss = F.binary_cross_entropy_with_logits(pred, target)
                 
-                # 5. 计算梯度并立即释放
-                grad = torch.autograd.grad(loss, latents_in)[0]
+                # # 5. 计算梯度并立即释放
+                # grad = torch.autograd.grad(loss, latents_in)[0]
                 
-                # 6. 显式删除不需要的张量
-                del loss, pred, images, images_norm, latents_scaled
+                # # 6. 显式删除不需要的张量
+                # del loss, pred, images, images_norm, latents_scaled
+
+                ## ========== v2: 直接最大化评估器的准确率计算 ========== ##
+                ## BUG: 'float' object is not iterable
+
+                # cls_score = self._classifier.resnet18(images_norm.to(cls_device))
+
+                # # 直接最大化评估器的准确率计算
+                # acc = self._classifier.compute_acc(cls_score.cpu(), labels.cpu())
+                # # 使用负的准确率作为损失函数，乘10放大梯度
+                # cls_loss = -acc * 10.0 
+
+                # grad = torch.autograd.grad(cls_loss, latents_in)[0]
+                
+                # del cls_score, acc, cls_loss, images, images_norm, latents_scaled
+
+                ## ========== 修改分类器引导实现 ========== ##
+
+                # 计算准确度作为损失
+                cls_score = self._classifier.resnet18(images_norm.to(cls_device))
+                
+                # 多目标损失：准确率最大化 + 物体数量控制
+                target_count = labels.sum(dim=1, keepdim=True).to(cls_device)  # 获取期望物体数量
+                pred_count = torch.sigmoid(cls_score).sum(dim=1, keepdim=True)  # 估计的物体数量
+                
+                # 1. 准确率损失 (使用evaluator的准确率计算)
+                acc_loss = -self._classifier.compute_acc(cls_score.cpu(), labels.cpu()) * 10.0
+                
+                # 2. 物体数量损失 (惩罚物体数量差异)
+                count_loss = F.mse_loss(pred_count, target_count) * 5.0
+                
+                # 组合损失
+                total_loss = acc_loss + count_loss
+                
+                # 计算梯度
+                grad = torch.autograd.grad(total_loss, latents_in)[0]
                 
                 # 7. 标准化梯度
-                grad_norm = torch.norm(grad) + 1e-10
-                grad = grad / grad_norm
+                grad_norm = torch.norm(grad)
+                if grad_norm > 0:
+                    grad = grad / grad_norm
                 
                 # 8. 应用梯度
                 return noise_pred - classifier_scale * grad.to(device)
         
         except Exception as e:
+            # 新增第幾行出錯
+
             print(f"分类器引导出错 ({t.item()}): {e}")
             torch.cuda.empty_cache()  # 错误时清理
             return noise_pred  # 出错时返回原始预测

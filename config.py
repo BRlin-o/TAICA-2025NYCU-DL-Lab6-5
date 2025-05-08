@@ -33,8 +33,8 @@ class Config:
     # 模型架構設定
     PRETRAINED_MODEL = "stabilityai/sd-turbo"  # 預訓練模型名稱
     USE_LORA = True                   # 是否使用LoRA
-    LORA_RANK = 24                    # LoRA的rank
-    LORA_ALPHA = 48                   # LoRA的alpha值
+    LORA_RANK = 32                    # LoRA的rank
+    LORA_ALPHA = 64                   # LoRA的alpha值
     VAE_MODEL = "stabilityai/sd-vae-ft-mse"  # 預訓練VAE模型
     LATENT_CHANNELS = 4               # 潛在空間的通道數
     CONDITION_DIM = 1024               # 條件嵌入維度
